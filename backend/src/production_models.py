@@ -26,7 +26,8 @@ class PressHold(Base):
     __tablename__='press_holds'
     id:Mapped[int]=mapped_column(primary_key=True)
     job_id:Mapped[int]=mapped_column(ForeignKey('print_jobs.id'))
-    sample_id:Mapped[int]=mapped_column(ForeignKey('press_samples.id'),unique=True)
+    # 参考修订复判触发的停机没有对应量产抽检，允许为空；唯一索引仍保证一抽检一停机
+    sample_id:Mapped[int|None]=mapped_column(ForeignKey('press_samples.id'),unique=True,nullable=True)
     reason:Mapped[str]=mapped_column(String(300))
     state:Mapped[str]=mapped_column(String(24),default='active')
     created_at:Mapped[str]=mapped_column(String(40))

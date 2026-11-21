@@ -1,6 +1,7 @@
 from sqlalchemy import String,Integer,Float,Boolean,ForeignKey,JSON,CheckConstraint
 from sqlalchemy.orm import Mapped,mapped_column
 from .db import Base
+INITIAL_MODEL_VERSION=1
 class User(Base):
     __tablename__='users'
     id:Mapped[int]=mapped_column(primary_key=True)
@@ -31,6 +32,8 @@ class ProofSheet(Base):
     pass_flag:Mapped[bool]=mapped_column(Boolean,default=False)
     classification_state:Mapped[str]=mapped_column(String(20),default='unmeasured')
     classified_at:Mapped[str|None]=mapped_column(String(40),nullable=True)
+    # 判读所依据的模型版本；迟回的旧版本计算不得覆盖新版本判读
+    model_version:Mapped[int]=mapped_column(Integer,default=INITIAL_MODEL_VERSION)
     evidence:Mapped[dict|None]=mapped_column(JSON,nullable=True)
 class Adjustment(Base):
     __tablename__='adjustments'
@@ -53,6 +56,8 @@ class ReferenceSheet(Base):
     density_k:Mapped[float]=mapped_column(Float)
     dot_gain:Mapped[float]=mapped_column(Float)
     label:Mapped[str]=mapped_column(String(20))
+    # active 才允许进入训练；withdrawn 撤回参考张保留原始数据但不再入训练，且不可再被送测引用
+    state:Mapped[str]=mapped_column(String(20),default='active')
 class Audit(Base):
     __tablename__='audits'
     id:Mapped[int]=mapped_column(primary_key=True)

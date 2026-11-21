@@ -12,6 +12,8 @@ def gate(s,j):
     sample=s.scalar(select(PressSample).where(PressSample.job_id==j.id,PressSample.state=='passed').order_by(PressSample.sequence.desc()))
     if not sample:raise HTTPException(409,'须有合格量产抽检才可装箱发货')
     proof=s.get(ProofSheet,sample.proof_id)
+    from .revision_service import assert_current_basis
+    assert_current_basis(s,proof.id,'封箱发货')
     return {'sample_id':sample.id,'sequence':sample.sequence,'quantity':sample.quantity,'proof_code':proof.code,'plate':sample.plate_snapshot,'net_paper':net_paper(s,j.id)}
 def sealed(s,jid):return int(s.scalar(select(func.coalesce(func.sum(PrintPack.sheets),0)).where(PrintPack.job_id==jid,PrintPack.state.in_(['sealed','shipped']))))
 

@@ -97,3 +97,21 @@ PrintPack箱码唯一，open可取消；production且无活动Hold/待判读样�
 按父工单锁串行化领退纸、累计印量、封箱和装运；锁读populate_existing刷新身份缓存。MySQL使用READ COMMITTED，取得工单锁后的聚合读取已提交净领纸/封箱量，避免等待前快照导致超额。种子仅缺失时添加157g/128g批次和PRESS-04，保留人工库存、历史signed与发货快照。
 
 本演示按张数追溯，不接真实WMS/物流，也不估算裁切、调机废纸；生产累计读数和现场可退余纸由机长录入，系统约束上限及一次退回。原240次/分钟限流仍生效。真实v3证据保存在test-artifacts/gb-1030/v3/。
+
+## V4 参考色标更正/撤回与可追溯判读版本
+
+错标参考会让复验误放行。本版在不改动既有签印与判读证据的前提下，加入参考修订、判读模型版本与中断可恢复的复核链，新增第十页“参考修订与判读版本”。
+
+**训练口径（互斥与送测隔离）**：`ReferenceSheet` 增加 `active/withdrawn` 状态，SVM 训练只取 active 参考；撤回张保留原始数据但永不入训练，且不能再次修订。送测 ProofSheet 始终不插入参考。分类器沿用 seed42 分层 120 训练 / 30 留出，证据新增 `model_version` 与各参考 `reference_states`，可证明训练/留出互斥、撤回张不在其中。撤回后参考总数不足 60 或任一类别少于 2 张时拒绝发布，避免无法分层留出。
+
+**修订发布与版本化**：主管可对单张参考 `correct`（更正标签，同标签拒绝）或 `withdraw`（撤回），每次发布形成递增 `ReferenceRevision.model_version`（V2、V3…）并记录旧标签、新标签、依据、操作人与时间。上一版复核未全部成功前拒绝发布新版（409），修订期间仍可正常收样登记。发布即对全部已有结论/判读中/失败的历史色标生成 `ReclassificationJob` 并交 worker 逐张重判；未测量的新张不建复核。
+
+**撤销旧结论、停机与复机门槛**：重判先把色标当前结论写入不可变 `ClassificationHistory`（含版本、来源 `worker`/`revision-<id>`、完整证据），再覆盖为新判读并把色标 `model_version` 升到目标版本。量产抽检张重判不合格即翻 `held` 并把工单置 `hold`；量产工单中的非抽检张重判不合格同样生成修订停机单（`sample_id` 可空），原因注明修订版本与被撤销结论。同工单已有活动停机单则挂接，不重复建单。修订停机单保持停机，必须由主管在复机页以当前版本合格新色标关闭，全部复核成功前签印、复机、封箱发货均拒绝旧依据（`assert_current_basis`）。
+
+**并发、迟回与恢复**：复核消息携带目标模型版本；worker 对 `reclass` 与旧版裸 `classify` 消息分流，色标版本已被更新版本接管时丢弃迟回结果，不覆盖新判读；重复消息按作业状态幂等，不重复建版、不重复停机单、不重复写历史。worker 启动调用 `enqueue_pending` 恢复 queued 及中断残留的 running 作业；失败作业落 `failed` 并保留 `last_error` 与尝试次数，可在页面或 `POST /reference-revisions/{id}/retry` 重试，重试不新建版本。复判进行中对同一色标的手动判读返回 409，避免竞态。
+
+**新增接口与页面**：`GET /references`、`POST /references/{id}/correct`、`POST /references/{id}/withdraw`（仅主管）；`GET /reference-revisions`（含进度 total/succeeded/failed/pending 与 failures）、`GET /reference-revisions/{id}/jobs`、`POST /reference-revisions/{id}/retry`（机长/主管）、`GET /proofs/{id}/history`（三角色可读）。页面可更正、撤回参考，查看每张复核进度、失败原因、采用版本与逐张判读沿革；判读页与色标列表显示 V 版本，复判进行中自动轮询。
+
+**兼容与持久化**：新表 `reference_revisions/reclassification_jobs/classification_history` 由 `create_all` 建齐；对既有库通过 `ensure_schema` 增量补 `reference_sheets.state`、`proof_sheets.model_version` 并把 `press_holds.sample_id` 放宽为可空，只增不改不删数据。SQLite 方言启用 WAL 与 busy_timeout 便于本地/测试，生产仍用 MySQL READ COMMITTED。历史签印、已闭合停机与发货快照不回写。
+
+后端新增 `revision_models/revision_schemas/revision_routes/revision_service`，改动 `classifier/worker/models/production_models/services/sampling_service/shipment_service/main/db/constants`；前端新增 `pages/revisions.js` 并接入 store/app 与既有判读、调机、色标页。70 项端到端断言（假 Redis + 真实 worker 线程 + sqlite）覆盖训练互斥、送测隔离、更正/撤回、版本递增、复判停机幂等、旧依据拒绝、迟回丢弃、中断恢复、失败重试与三角色权限，连续多轮稳定通过。

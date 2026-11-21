@@ -9,7 +9,7 @@ def get(s,cls,id):
     if not v:raise HTTPException(404,'记录不存在')
     return v
 def pack(v):return {c.name:getattr(v,c.name)for c in v.__table__.columns}
-def audit(s,u,action):s.add(Audit(actor=u.email,action=action,stamp=now()))
+def audit(s,u,action):s.add(Audit(actor=getattr(u,'email',u),action=action,stamp=now()))
 def editable_proof(s,p):
     if p.classification_state=='classifying':raise HTTPException(409,'判读进行中，色标暂不可修改')
     if get(s,PrintJob,p.job_id).status in ['production','hold']:raise HTTPException(409,'已签印量产工单，色标已冻结')
@@ -39,6 +39,9 @@ def sign(s,aid,reproof_id,user):
     if p.id==a.proof_id or p.job_id!=job.id:raise HTTPException(409,'复验张必须来自同一工单且不同于首张')
     if p.classification_state!='classified'or not p.pass_flag or p.defect!='合格':raise HTTPException(409,'复验张未判为合格，禁止恢复量产')
     if not p.classified_at or p.classified_at<a.executed_at:raise HTTPException(409,'复验判读必须在调机执行之后完成')
+    from .revision_service import assert_current_basis
+    assert_current_basis(s,reproof_id,'主管签印')
+    assert_current_basis(s,a.proof_id,'主管签印')
     from .plate_service import require_ready
     require_ready(s,job.id)
     a.reproof_id=p.id;a.status='signed';a.signed_by=user.email;job.status='production';return a
